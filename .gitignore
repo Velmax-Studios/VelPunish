@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+build/
+
+# Gradle Wrapper (keep this)
+!gradle/wrapper/gradle-wrapper.jar
+
+# Java / Build
+out/
+bin/
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Eclipse
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.swp
+*~
+
+# Runtime
+run/
+logs/
