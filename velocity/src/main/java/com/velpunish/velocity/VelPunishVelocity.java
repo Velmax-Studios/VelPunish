@@ -51,6 +51,8 @@ public class VelPunishVelocity {
 
         redisManager.connect();
 
+        server.getEventManager().register(this, new com.velpunish.velocity.listeners.LoginListener(this));
+
         logger.info("VelPunish velocity plugin initialized successfully.");
     }
 
