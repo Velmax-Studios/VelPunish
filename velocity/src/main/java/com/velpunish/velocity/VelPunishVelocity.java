@@ -14,7 +14,9 @@ import com.velpunish.common.sync.RedisConfig;
 import com.velpunish.common.sync.RedisManager;
 import org.slf4j.Logger;
 
-@Plugin(id = "velpunish", name = "VelPunish", version = "1.0.0", authors = { "Aarav Roy" })
+import java.util.UUID;
+
+@Plugin(id = "velpunish", name = "VelPunish", version = "1.0.0", authors = { "VelMax Studios" })
 public class VelPunishVelocity {
 
     private final ProxyServer server;
@@ -47,6 +49,35 @@ public class VelPunishVelocity {
         redisManager = new RedisManager(redisConfig);
 
         redisManager.setMessageHandler(message -> {
+            String[] parts = message.split(":");
+            if (parts.length >= 3 && "PUNISHMENT".equals(parts[0])) {
+                try {
+                    UUID targetUuid = UUID.fromString(parts[1]);
+                    punishmentCache.invalidate(targetUuid);
+
+                    server.getPlayer(targetUuid).ifPresent(player -> {
+                        punishmentRepository
+                                .getHistory(targetUuid, player.getRemoteAddress().getAddress().getHostAddress())
+                                .thenAccept(history -> {
+                                    punishmentCache.cacheHistory(history);
+                                    history.getPunishments().stream()
+                                            .filter(com.velpunish.common.models.Punishment::isActive)
+                                            .filter(p -> p.getType().name().equals("BAN")
+                                                    || p.getType().name().equals("KICK"))
+                                            .findFirst()
+                                            .ifPresent(p -> {
+                                                player.disconnect(net.kyori.adventure.text.Component
+                                                        .text("You have been punished!\n")
+                                                        .color(net.kyori.adventure.text.format.NamedTextColor.RED)
+                                                        .append(net.kyori.adventure.text.Component
+                                                                .text("Reason: " + p.getReason())
+                                                                .color(net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+                                            });
+                                });
+                    });
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
         });
 
         redisManager.connect();
