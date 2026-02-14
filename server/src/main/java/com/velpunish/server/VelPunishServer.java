@@ -34,10 +34,19 @@ public class VelPunishServer extends JavaPlugin {
         redisManager = new RedisManager(redisConfig);
 
         redisManager.setMessageHandler(message -> {
-
+            String[] parts = message.split(":");
+            if (parts.length >= 3 && "PUNISHMENT".equals(parts[0])) {
+                try {
+                    java.util.UUID targetUuid = java.util.UUID.fromString(parts[1]);
+                    punishmentCache.invalidate(targetUuid);
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
         });
 
         redisManager.connect();
+
+        getServer().getPluginManager().registerEvents(new com.velpunish.server.listeners.ChatListener(this), this);
 
         getLogger().info("VelPunish server plugin initialized successfully.");
     }
