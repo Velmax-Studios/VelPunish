@@ -138,6 +138,28 @@ public class PunishmentRepository {
         }, executor);
     }
 
+    public CompletableFuture<Void> updatePunishment(Punishment punishment) {
+        return CompletableFuture.runAsync(() -> {
+            try (Connection conn = databaseManager.getConnection();
+                    PreparedStatement stmt = conn.prepareStatement(
+                            "UPDATE punishments SET active = ?, uuid = ?, ip = ?, type = ?, reason = ?, operator = ?, start_time = ?, end_time = ?, server = ? WHERE id = ?")) {
+                stmt.setBoolean(1, punishment.isActive());
+                stmt.setString(2, punishment.getUuid().toString());
+                stmt.setString(3, punishment.getIp());
+                stmt.setString(4, punishment.getType().name());
+                stmt.setString(5, punishment.getReason());
+                stmt.setString(6, punishment.getOperator());
+                stmt.setLong(7, punishment.getStartTime());
+                stmt.setLong(8, punishment.getEndTime());
+                stmt.setString(9, punishment.getServer());
+                stmt.setInt(10, punishment.getId());
+                stmt.executeUpdate();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }, executor);
+    }
+
     public CompletableFuture<Void> revokeIPPunishment(int id) {
         return CompletableFuture.runAsync(() -> {
             try (Connection conn = databaseManager.getConnection();

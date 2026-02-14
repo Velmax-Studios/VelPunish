@@ -142,5 +142,233 @@ public class CommandSystem {
                         }
                     });
                 }));
+
+        Command.Builder<CommandSource> unbanBuilder = commandManager.commandBuilder("unban", "velpunish.command.unban");
+        commandManager.command(unbanBuilder
+                .required("player", stringParser())
+                .optional("reason", greedyStringParser(), DefaultValue.constant("Unbanned."))
+                .handler(context -> {
+                    String targetName = context.get("player");
+                    String reason = context.getOrDefault("reason", "Unbanned.");
+                    CommandSource source = context.sender();
+
+                    plugin.getServer().getPlayer(targetName).ifPresentOrElse(target -> {
+                        UUID targetUuid = target.getUniqueId();
+                        String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
+                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+
+                        plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
+                            boolean unbanned = false;
+                            for (Punishment p : history.getPunishments()) {
+                                if (p.isActive() && p.getType() == PunishmentType.BAN) {
+                                    p.setActive(false);
+                                    plugin.getPunishmentRepository().updatePunishment(p);
+                                    unbanned = true;
+                                }
+                            }
+
+                            if (unbanned) {
+                                plugin.getPunishmentCache().invalidate(targetUuid);
+                                plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":0");
+                                source.sendMessage(
+                                        Component.text("Unbanned " + targetName + ".").color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(
+                                        Component.text(targetName + " is not banned.").color(NamedTextColor.RED));
+                            }
+                        });
+                    }, () -> {
+                        source.sendMessage(Component.text(
+                                "Player not found online. (Offline lookup not implemented for unban command via Cloud yet)")
+                                .color(NamedTextColor.RED));
+                    });
+                }));
+
+        Command.Builder<CommandSource> tempbanBuilder = commandManager.commandBuilder("tempban",
+                "velpunish.command.tempban");
+        commandManager.command(tempbanBuilder
+                .required("player", stringParser())
+                .required("duration", stringParser())
+                .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Banned."))
+                .handler(context -> {
+                    String targetName = context.get("player");
+                    String durationStr = context.get("duration");
+                    String reason = context.getOrDefault("reason", "Temporarily Banned.");
+                    CommandSource source = context.sender();
+
+                    long expiry = parseDuration(durationStr);
+                    if (expiry == -1L) {
+                        source.sendMessage(Component.text("Invalid duration format. Use 1d, 1h, 30m, etc.")
+                                .color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
+                    if (targetOpt.isEmpty()) {
+                        source.sendMessage(Component.text("Player not found online.").color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    Player target = targetOpt.get();
+                    UUID targetUuid = target.getUniqueId();
+                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
+                    String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+
+                    Punishment punishment = new Punishment(
+                            0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
+                            System.currentTimeMillis(), expiry, true, "network");
+
+                    plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
+                        plugin.getPunishmentCache().addPunishment(targetUuid, saved);
+                        plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
+
+                        target.disconnect(
+                                Component.text("You are temporarily banned from this network!\n")
+                                        .color(NamedTextColor.RED)
+                                        .append(Component.text("Reason: " + reason + "\n").color(NamedTextColor.GRAY))
+                                        .append(Component.text("Duration: " + durationStr).color(NamedTextColor.GRAY)));
+
+                        source.sendMessage(
+                                Component.text("Temporarily Banned " + targetName + " for " + durationStr + ".")
+                                        .color(NamedTextColor.GREEN));
+                    });
+                }));
+
+        Command.Builder<CommandSource> unmuteBuilder = commandManager.commandBuilder("unmute",
+                "velpunish.command.unmute");
+        commandManager.command(unmuteBuilder
+                .required("player", stringParser())
+                .optional("reason", greedyStringParser(), DefaultValue.constant("Unmuted."))
+                .handler(context -> {
+                    String targetName = context.get("player");
+                    String reason = context.getOrDefault("reason", "Unmuted.");
+                    CommandSource source = context.sender();
+
+                    plugin.getServer().getPlayer(targetName).ifPresentOrElse(target -> {
+                        UUID targetUuid = target.getUniqueId();
+                        String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
+                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+
+                        plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
+                            boolean unmuted = false;
+                            for (Punishment p : history.getPunishments()) {
+                                if (p.isActive() && p.getType() == PunishmentType.MUTE) {
+                                    p.setActive(false);
+                                    plugin.getPunishmentRepository().updatePunishment(p);
+                                    unmuted = true;
+                                }
+                            }
+
+                            if (unmuted) {
+                                plugin.getPunishmentCache().invalidate(targetUuid);
+                                plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":0");
+                                target.sendMessage(
+                                        Component.text("You have been unmuted.").color(NamedTextColor.GREEN));
+                                source.sendMessage(
+                                        Component.text("Unmuted " + targetName + ".").color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(
+                                        Component.text(targetName + " is not muted.").color(NamedTextColor.RED));
+                            }
+                        });
+                    }, () -> {
+                        source.sendMessage(Component.text(
+                                "Player not found online. (Offline lookup not implemented for unmute command via Cloud yet)")
+                                .color(NamedTextColor.RED));
+                    });
+                }));
+
+        Command.Builder<CommandSource> tempmuteBuilder = commandManager.commandBuilder("tempmute",
+                "velpunish.command.tempmute");
+        commandManager.command(tempmuteBuilder
+                .required("player", stringParser())
+                .required("duration", stringParser())
+                .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Muted."))
+                .handler(context -> {
+                    String targetName = context.get("player");
+                    String durationStr = context.get("duration");
+                    String reason = context.getOrDefault("reason", "Temporarily Muted.");
+                    CommandSource source = context.sender();
+
+                    long expiry = parseDuration(durationStr);
+                    if (expiry == -1L) {
+                        source.sendMessage(Component.text("Invalid duration format. Use 1d, 1h, 30m, etc.")
+                                .color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
+                    if (targetOpt.isEmpty()) {
+                        source.sendMessage(Component.text("Player not found online.").color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    Player target = targetOpt.get();
+                    UUID targetUuid = target.getUniqueId();
+                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
+                    String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+
+                    Punishment punishment = new Punishment(
+                            0, targetUuid, targetIp, PunishmentType.MUTE, reason, operator,
+                            System.currentTimeMillis(), expiry, true, "network");
+
+                    plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
+                        plugin.getPunishmentCache().addPunishment(targetUuid, saved);
+                        plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
+
+                        target.sendMessage(
+                                Component.text("You have been temporarily muted!\n").color(NamedTextColor.RED)
+                                        .append(Component.text("Reason: " + reason + "\n").color(NamedTextColor.GRAY))
+                                        .append(Component.text("Duration: " + durationStr).color(NamedTextColor.GRAY)));
+
+                        source.sendMessage(
+                                Component.text("Temporarily Muted " + targetName + " for " + durationStr + ".")
+                                        .color(NamedTextColor.GREEN));
+                    });
+                }));
+    }
+
+    private long parseDuration(String input) {
+        if (input == null || input.isEmpty())
+            return -1L;
+        long multiplier = 1000L;
+        char lastChar = Character.toLowerCase(input.charAt(input.length() - 1));
+        String numberPart = input;
+
+        if (Character.isLetter(lastChar)) {
+            numberPart = input.substring(0, input.length() - 1);
+            switch (lastChar) {
+                case 's':
+                    multiplier = 1000L;
+                    break;
+                case 'm':
+                    multiplier = 60000L;
+                    break;
+                case 'h':
+                    multiplier = 3600000L;
+                    break;
+                case 'd':
+                    multiplier = 86400000L;
+                    break;
+                case 'w':
+                    multiplier = 604800000L;
+                    break;
+                case 'M':
+                    multiplier = 2592000000L;
+                    break;
+                case 'y':
+                    multiplier = 31536000000L;
+                    break;
+                default:
+                    return -1L;
+            }
+        }
+
+        try {
+            long value = Long.parseLong(numberPart);
+            return System.currentTimeMillis() + (value * multiplier);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 }
