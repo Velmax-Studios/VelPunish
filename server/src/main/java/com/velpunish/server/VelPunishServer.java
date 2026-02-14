@@ -82,6 +82,10 @@ public class VelPunishServer extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new com.velpunish.server.listeners.ChatListener(this), this);
         new com.velpunish.server.commands.CommandSystem(this);
 
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new com.velpunish.server.hooks.VelPunishExpansion(this).register();
+        }
+
         getLogger().info("VelPunish server plugin initialized successfully.");
     }
 
