@@ -145,14 +145,34 @@ public class CommandSystem {
 
         Command.Builder<CommandSource> unbanBuilder = commandManager.commandBuilder("unban", "velpunish.command.unban");
         commandManager.command(unbanBuilder
-                .required("player", stringParser())
+                .required("player_or_id", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unbanned."))
                 .handler(context -> {
-                    String targetName = context.get("player");
+                    String identifier = context.get("player_or_id");
                     String reason = context.getOrDefault("reason", "Unbanned.");
                     CommandSource source = context.sender();
 
-                    plugin.getServer().getPlayer(targetName).ifPresentOrElse(target -> {
+                    try {
+                        int id = Integer.parseInt(identifier);
+                        plugin.getPunishmentRepository().getPunishmentById(id).thenAccept(punishment -> {
+                            if (punishment != null && punishment.getType() == PunishmentType.BAN
+                                    && punishment.isActive()) {
+                                punishment.setActive(false);
+                                plugin.getPunishmentRepository().updatePunishment(punishment);
+                                plugin.getPunishmentCache().invalidate(punishment.getUuid());
+                                plugin.getRedisManager().publishMessage("PUNISHMENT:" + punishment.getUuid() + ":0");
+                                source.sendMessage(
+                                        Component.text("Unbanned ID #" + id + ".").color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(Component.text("Active ban with ID #" + id + " not found.")
+                                        .color(NamedTextColor.RED));
+                            }
+                        });
+                        return;
+                    } catch (NumberFormatException ignored) {
+                    }
+
+                    plugin.getServer().getPlayer(identifier).ifPresentOrElse(target -> {
                         UUID targetUuid = target.getUniqueId();
                         String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
                         String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
@@ -171,10 +191,10 @@ public class CommandSystem {
                                 plugin.getPunishmentCache().invalidate(targetUuid);
                                 plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":0");
                                 source.sendMessage(
-                                        Component.text("Unbanned " + targetName + ".").color(NamedTextColor.GREEN));
+                                        Component.text("Unbanned " + identifier + ".").color(NamedTextColor.GREEN));
                             } else {
                                 source.sendMessage(
-                                        Component.text(targetName + " is not banned.").color(NamedTextColor.RED));
+                                        Component.text(identifier + " is not banned.").color(NamedTextColor.RED));
                             }
                         });
                     }, () -> {
@@ -237,14 +257,34 @@ public class CommandSystem {
         Command.Builder<CommandSource> unmuteBuilder = commandManager.commandBuilder("unmute",
                 "velpunish.command.unmute");
         commandManager.command(unmuteBuilder
-                .required("player", stringParser())
+                .required("player_or_id", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unmuted."))
                 .handler(context -> {
-                    String targetName = context.get("player");
+                    String identifier = context.get("player_or_id");
                     String reason = context.getOrDefault("reason", "Unmuted.");
                     CommandSource source = context.sender();
 
-                    plugin.getServer().getPlayer(targetName).ifPresentOrElse(target -> {
+                    try {
+                        int id = Integer.parseInt(identifier);
+                        plugin.getPunishmentRepository().getPunishmentById(id).thenAccept(punishment -> {
+                            if (punishment != null && punishment.getType() == PunishmentType.MUTE
+                                    && punishment.isActive()) {
+                                punishment.setActive(false);
+                                plugin.getPunishmentRepository().updatePunishment(punishment);
+                                plugin.getPunishmentCache().invalidate(punishment.getUuid());
+                                plugin.getRedisManager().publishMessage("PUNISHMENT:" + punishment.getUuid() + ":0");
+                                source.sendMessage(
+                                        Component.text("Unmuted ID #" + id + ".").color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(Component.text("Active mute with ID #" + id + " not found.")
+                                        .color(NamedTextColor.RED));
+                            }
+                        });
+                        return;
+                    } catch (NumberFormatException ignored) {
+                    }
+
+                    plugin.getServer().getPlayer(identifier).ifPresentOrElse(target -> {
                         UUID targetUuid = target.getUniqueId();
                         String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
                         String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
@@ -265,10 +305,10 @@ public class CommandSystem {
                                 target.sendMessage(
                                         Component.text("You have been unmuted.").color(NamedTextColor.GREEN));
                                 source.sendMessage(
-                                        Component.text("Unmuted " + targetName + ".").color(NamedTextColor.GREEN));
+                                        Component.text("Unmuted " + identifier + ".").color(NamedTextColor.GREEN));
                             } else {
                                 source.sendMessage(
-                                        Component.text(targetName + " is not muted.").color(NamedTextColor.RED));
+                                        Component.text(identifier + " is not muted.").color(NamedTextColor.RED));
                             }
                         });
                     }, () -> {

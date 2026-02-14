@@ -173,6 +173,33 @@ public class PunishmentRepository {
         }, executor);
     }
 
+    public CompletableFuture<Punishment> getPunishmentById(int id) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = databaseManager.getConnection();
+                    PreparedStatement stmt = conn.prepareStatement("SELECT * FROM punishments WHERE id = ?")) {
+                stmt.setInt(1, id);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return new Punishment(
+                                rs.getInt("id"),
+                                UUID.fromString(rs.getString("uuid")),
+                                rs.getString("ip"),
+                                PunishmentType.valueOf(rs.getString("type")),
+                                rs.getString("reason"),
+                                rs.getString("operator"),
+                                rs.getLong("start_time"),
+                                rs.getLong("end_time"),
+                                rs.getBoolean("active"),
+                                rs.getString("server"));
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return null;
+        }, executor);
+    }
+
     public CompletableFuture<History> getHistory(UUID uuid, String ip) {
         return CompletableFuture.supplyAsync(() -> {
             List<Punishment> punishments = new ArrayList<>();
