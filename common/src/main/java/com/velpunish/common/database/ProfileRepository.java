@@ -49,8 +49,7 @@ public class ProfileRepository {
         return CompletableFuture.runAsync(() -> {
             try (Connection conn = databaseManager.getConnection();
                     PreparedStatement stmt = conn.prepareStatement(
-                            "INSERT INTO player_profiles (uuid, username, latest_ip, last_login) VALUES (?, ?, ?, ?) " +
-                                    "ON DUPLICATE KEY UPDATE username = VALUES(username), latest_ip = VALUES(latest_ip), last_login = VALUES(last_login)")) {
+                            "MERGE INTO player_profiles (uuid, username, latest_ip, last_login) KEY(uuid) VALUES (?, ?, ?, ?)")) {
 
                 stmt.setString(1, profile.getUuid().toString());
                 stmt.setString(2, profile.getUsername());

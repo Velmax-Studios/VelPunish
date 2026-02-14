@@ -21,6 +21,11 @@ public class DatabaseManager {
         hikariConfig.setMaximumPoolSize(config.getMaxPoolSize());
         hikariConfig.setMinimumIdle(config.getMinIdle());
         hikariConfig.setConnectionTimeout(config.getConnectionTimeout());
+
+        if ("h2".equalsIgnoreCase(config.getType()) || "sqlite".equalsIgnoreCase(config.getType())) {
+            hikariConfig.setDriverClassName("org.h2.Driver");
+        }
+
         hikariConfig.addDataSourceProperty("cachePrepStmts", "true");
         hikariConfig.addDataSourceProperty("prepStmtCacheSize", "250");
         hikariConfig.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
@@ -31,6 +36,8 @@ public class DatabaseManager {
     private String buildJdbcUrl() {
         if ("postgresql".equalsIgnoreCase(config.getType())) {
             return "jdbc:postgresql://" + config.getHost() + ":" + config.getPort() + "/" + config.getDatabase();
+        } else if ("h2".equalsIgnoreCase(config.getType()) || "sqlite".equalsIgnoreCase(config.getType())) {
+            return "jdbc:h2:./plugins/VelPunish/database/" + config.getDatabase() + ";MODE=MySQL;AUTO_RECONNECT=TRUE";
         }
         return "jdbc:mysql://" + config.getHost() + ":" + config.getPort() + "/" + config.getDatabase();
     }

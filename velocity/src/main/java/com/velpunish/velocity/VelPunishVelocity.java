@@ -39,7 +39,7 @@ public class VelPunishVelocity {
 
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) {
-        DatabaseConfig dbConfig = new DatabaseConfig("mysql", "localhost", 3306, "velpunish", "root", "password", 10, 2,
+        DatabaseConfig dbConfig = new DatabaseConfig("h2", "localhost", 3306, "velpunish", "root", "password", 10, 2,
                 30000);
         databaseManager = new DatabaseManager(dbConfig);
         databaseManager.connect();
