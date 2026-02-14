@@ -9,6 +9,8 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import com.velpunish.common.cache.PunishmentCache;
 import com.velpunish.common.database.DatabaseConfig;
 import com.velpunish.common.database.DatabaseManager;
+import com.velpunish.common.database.ProfileCache;
+import com.velpunish.common.database.ProfileRepository;
 import com.velpunish.common.database.PunishmentRepository;
 import com.velpunish.common.sync.RedisConfig;
 import com.velpunish.common.sync.RedisManager;
@@ -25,6 +27,8 @@ public class VelPunishVelocity {
     private DatabaseManager databaseManager;
     private PunishmentRepository punishmentRepository;
     private PunishmentCache punishmentCache;
+    private ProfileRepository profileRepository;
+    private ProfileCache profileCache;
     private RedisManager redisManager;
 
     @Inject
@@ -44,6 +48,11 @@ public class VelPunishVelocity {
         punishmentRepository.createTables().join();
 
         punishmentCache = new PunishmentCache();
+
+        profileRepository = new ProfileRepository(databaseManager);
+        profileRepository.createTables().join();
+
+        profileCache = new ProfileCache(profileRepository);
 
         RedisConfig redisConfig = new RedisConfig("localhost", 6379, "", true);
         redisManager = new RedisManager(redisConfig);
@@ -83,6 +92,7 @@ public class VelPunishVelocity {
         redisManager.connect();
 
         server.getEventManager().register(this, new com.velpunish.velocity.listeners.LoginListener(this));
+        server.getEventManager().register(this, new com.velpunish.velocity.listeners.ProfileListener(this));
         new com.velpunish.velocity.commands.CommandSystem(this);
 
         logger.info("VelPunish velocity plugin initialized successfully.");
@@ -112,6 +122,14 @@ public class VelPunishVelocity {
 
     public PunishmentCache getPunishmentCache() {
         return punishmentCache;
+    }
+
+    public ProfileRepository getProfileRepository() {
+        return profileRepository;
+    }
+
+    public ProfileCache getProfileCache() {
+        return profileCache;
     }
 
     public RedisManager getRedisManager() {

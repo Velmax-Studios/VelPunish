@@ -3,6 +3,8 @@ package com.velpunish.server;
 import com.velpunish.common.cache.PunishmentCache;
 import com.velpunish.common.database.DatabaseConfig;
 import com.velpunish.common.database.DatabaseManager;
+import com.velpunish.common.database.ProfileCache;
+import com.velpunish.common.database.ProfileRepository;
 import com.velpunish.common.database.PunishmentRepository;
 import com.velpunish.common.sync.RedisConfig;
 import com.velpunish.common.sync.RedisManager;
@@ -13,6 +15,8 @@ public class VelPunishServer extends JavaPlugin {
     private DatabaseManager databaseManager;
     private PunishmentRepository punishmentRepository;
     private PunishmentCache punishmentCache;
+    private ProfileRepository profileRepository;
+    private ProfileCache profileCache;
     private RedisManager redisManager;
     private boolean isFolia;
 
@@ -29,6 +33,11 @@ public class VelPunishServer extends JavaPlugin {
         punishmentRepository.createTables().join();
 
         punishmentCache = new PunishmentCache();
+
+        profileRepository = new ProfileRepository(databaseManager);
+        profileRepository.createTables().join();
+
+        profileCache = new ProfileCache(profileRepository);
 
         RedisConfig redisConfig = new RedisConfig("localhost", 6379, "", true);
         redisManager = new RedisManager(redisConfig);
@@ -80,6 +89,7 @@ public class VelPunishServer extends JavaPlugin {
         redisManager.connect();
 
         getServer().getPluginManager().registerEvents(new com.velpunish.server.listeners.ChatListener(this), this);
+        getServer().getPluginManager().registerEvents(new com.velpunish.server.listeners.ProfileListener(this), this);
         new com.velpunish.server.commands.CommandSystem(this);
 
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
@@ -120,6 +130,14 @@ public class VelPunishServer extends JavaPlugin {
 
     public PunishmentCache getPunishmentCache() {
         return punishmentCache;
+    }
+
+    public ProfileRepository getProfileRepository() {
+        return profileRepository;
+    }
+
+    public ProfileCache getProfileCache() {
+        return profileCache;
     }
 
     public RedisManager getRedisManager() {

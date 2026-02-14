@@ -15,10 +15,13 @@ import org.incendo.cloud.velocity.VelocityCommandManager;
 
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.incendo.cloud.parser.standard.StringParser.greedyStringParser;
 import static org.incendo.cloud.parser.standard.StringParser.stringParser;
+import org.incendo.cloud.component.CommandComponent;
+import com.velpunish.common.commands.OfflinePlayerSuggestionProvider;
+import com.velpunish.common.models.PlayerProfile;
 
 public class CommandSystem {
 
@@ -35,48 +38,60 @@ public class CommandSystem {
         registerCommands();
     }
 
+    private void resolveTarget(String targetName, Consumer<PlayerProfile> callback, Runnable onNotFound) {
+        plugin.getProfileCache().getProfile(targetName).thenAccept(profileOpt -> {
+            if (profileOpt.isPresent()) {
+                callback.accept(profileOpt.get());
+            } else {
+                onNotFound.run();
+            }
+        });
+    }
+
     private void registerCommands() {
         Command.Builder<CommandSource> banBuilder = commandManager.commandBuilder("ban", "velpunish.command.ban");
         commandManager.command(banBuilder
-                .required("player", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("The Ban Hammer has spoken!"))
                 .handler(context -> {
                     String targetName = context.get("player");
                     String reason = context.getOrDefault("reason", "The Ban Hammer has spoken!");
                     CommandSource source = context.sender();
 
-                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
-                    if (targetOpt.isEmpty()) {
-                        source.sendMessage(Component.text("Player not found online.").color(NamedTextColor.RED));
-                        return;
-                    }
+                    resolveTarget(targetName, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
+                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
 
-                    Player target = targetOpt.get();
-                    UUID targetUuid = target.getUniqueId();
-                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-                    String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+                        Punishment punishment = new Punishment(
+                                0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
+                                System.currentTimeMillis(), -1, true, "network");
 
-                    Punishment punishment = new Punishment(
-                            0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
-                            System.currentTimeMillis(), -1, true, "network");
+                        plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
+                            plugin.getPunishmentCache().addPunishment(targetUuid, saved);
+                            plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
 
-                    plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
-                        plugin.getPunishmentCache().addPunishment(targetUuid, saved);
-                        plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
+                            plugin.getServer().getPlayer(targetUuid).ifPresent(p -> p.disconnect(
+                                    Component.text("You are banned from this network!\n").color(NamedTextColor.RED)
+                                            .append(Component.text("Reason: " + reason + "\n")
+                                                    .color(NamedTextColor.GRAY))
+                                            .append(Component.text("Duration: Permanent").color(NamedTextColor.GRAY))));
 
-                        target.disconnect(
-                                Component.text("You are banned from this network!\n").color(NamedTextColor.RED)
-                                        .append(Component.text("Reason: " + reason + "\n").color(NamedTextColor.GRAY))
-                                        .append(Component.text("Duration: Permanent").color(NamedTextColor.GRAY)));
-
-                        source.sendMessage(
-                                Component.text("Banned " + targetName + " permanently.").color(NamedTextColor.GREEN));
-                    });
+                            source.sendMessage(
+                                    Component.text("Banned " + targetName + " permanently.")
+                                            .color(NamedTextColor.GREEN));
+                        });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
 
         Command.Builder<CommandSource> kickBuilder = commandManager.commandBuilder("kick", "velpunish.command.kick");
         commandManager.command(kickBuilder
-                .required("player", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Kicked by an operator."))
                 .handler(context -> {
                     String targetName = context.get("player");
@@ -111,41 +126,40 @@ public class CommandSystem {
         Command.Builder<CommandSource> historyBuilder = commandManager.commandBuilder("history",
                 "velpunish.command.history");
         commandManager.command(historyBuilder
-                .required("player", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .handler(context -> {
                     String targetName = context.get("player");
                     CommandSource source = context.sender();
 
-                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
-                    if (targetOpt.isEmpty()) {
-                        source.sendMessage(Component.text(
-                                "Player not found. (Offline lookup not implemented for history command via Cloud yet)")
-                                .color(NamedTextColor.RED));
-                        return;
-                    }
+                    resolveTarget(targetName, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
 
-                    Player target = targetOpt.get();
-                    UUID targetUuid = target.getUniqueId();
-                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-
-                    plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
-                        source.sendMessage(
-                                Component.text("History for " + targetName + ":").color(NamedTextColor.GOLD));
-                        if (history.getPunishments().isEmpty()) {
-                            source.sendMessage(Component.text("No history found.").color(NamedTextColor.GRAY));
-                        } else {
-                            history.getPunishments().forEach(p -> {
-                                source.sendMessage(Component.text(
-                                        "- [" + p.getType() + "] " + p.getReason() + " (Active: " + p.isActive() + ")")
-                                        .color(NamedTextColor.YELLOW));
-                            });
-                        }
-                    });
+                        plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
+                            source.sendMessage(
+                                    Component.text("History for " + targetName + ":").color(NamedTextColor.GOLD));
+                            if (history.getPunishments().isEmpty()) {
+                                source.sendMessage(Component.text("No history found.").color(NamedTextColor.GRAY));
+                            } else {
+                                history.getPunishments().forEach(p -> {
+                                    source.sendMessage(Component.text(
+                                            "- [" + p.getType() + "] " + p.getReason() + " (Active: " + p.isActive()
+                                                    + ")")
+                                            .color(NamedTextColor.YELLOW));
+                                });
+                            }
+                        });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
 
         Command.Builder<CommandSource> unbanBuilder = commandManager.commandBuilder("unban", "velpunish.command.unban");
         commandManager.command(unbanBuilder
-                .required("player_or_id", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player_or_id").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unbanned."))
                 .handler(context -> {
                     String identifier = context.get("player_or_id");
@@ -172,10 +186,9 @@ public class CommandSystem {
                     } catch (NumberFormatException ignored) {
                     }
 
-                    plugin.getServer().getPlayer(identifier).ifPresentOrElse(target -> {
-                        UUID targetUuid = target.getUniqueId();
-                        String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+                    resolveTarget(identifier, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
 
                         plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
                             boolean unbanned = false;
@@ -197,17 +210,16 @@ public class CommandSystem {
                                         Component.text(identifier + " is not banned.").color(NamedTextColor.RED));
                             }
                         });
-                    }, () -> {
-                        source.sendMessage(Component.text(
-                                "Player not found online. (Offline lookup not implemented for unban command via Cloud yet)")
-                                .color(NamedTextColor.RED));
-                    });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
 
         Command.Builder<CommandSource> tempbanBuilder = commandManager.commandBuilder("tempban",
                 "velpunish.command.tempban");
         commandManager.command(tempbanBuilder
-                .required("player", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .required("duration", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Banned."))
                 .handler(context -> {
@@ -223,41 +235,41 @@ public class CommandSystem {
                         return;
                     }
 
-                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
-                    if (targetOpt.isEmpty()) {
-                        source.sendMessage(Component.text("Player not found online.").color(NamedTextColor.RED));
-                        return;
-                    }
+                    resolveTarget(targetName, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
+                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
 
-                    Player target = targetOpt.get();
-                    UUID targetUuid = target.getUniqueId();
-                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-                    String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+                        Punishment punishment = new Punishment(
+                                0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
+                                System.currentTimeMillis(), expiry, true, "network");
 
-                    Punishment punishment = new Punishment(
-                            0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
-                            System.currentTimeMillis(), expiry, true, "network");
+                        plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
+                            plugin.getPunishmentCache().addPunishment(targetUuid, saved);
+                            plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
 
-                    plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
-                        plugin.getPunishmentCache().addPunishment(targetUuid, saved);
-                        plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
+                            plugin.getServer().getPlayer(targetUuid).ifPresent(p -> p.disconnect(
+                                    Component.text("You are temporarily banned from this network!\n")
+                                            .color(NamedTextColor.RED)
+                                            .append(Component.text("Reason: " + reason + "\n")
+                                                    .color(NamedTextColor.GRAY))
+                                            .append(Component.text("Duration: " + durationStr)
+                                                    .color(NamedTextColor.GRAY))));
 
-                        target.disconnect(
-                                Component.text("You are temporarily banned from this network!\n")
-                                        .color(NamedTextColor.RED)
-                                        .append(Component.text("Reason: " + reason + "\n").color(NamedTextColor.GRAY))
-                                        .append(Component.text("Duration: " + durationStr).color(NamedTextColor.GRAY)));
-
-                        source.sendMessage(
-                                Component.text("Temporarily Banned " + targetName + " for " + durationStr + ".")
-                                        .color(NamedTextColor.GREEN));
-                    });
+                            source.sendMessage(
+                                    Component.text("Temporarily Banned " + targetName + " for " + durationStr + ".")
+                                            .color(NamedTextColor.GREEN));
+                        });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
 
         Command.Builder<CommandSource> unmuteBuilder = commandManager.commandBuilder("unmute",
                 "velpunish.command.unmute");
         commandManager.command(unmuteBuilder
-                .required("player_or_id", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player_or_id").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unmuted."))
                 .handler(context -> {
                     String identifier = context.get("player_or_id");
@@ -284,10 +296,9 @@ public class CommandSystem {
                     } catch (NumberFormatException ignored) {
                     }
 
-                    plugin.getServer().getPlayer(identifier).ifPresentOrElse(target -> {
-                        UUID targetUuid = target.getUniqueId();
-                        String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+                    resolveTarget(identifier, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
 
                         plugin.getPunishmentRepository().getHistory(targetUuid, targetIp).thenAccept(history -> {
                             boolean unmuted = false;
@@ -302,8 +313,8 @@ public class CommandSystem {
                             if (unmuted) {
                                 plugin.getPunishmentCache().invalidate(targetUuid);
                                 plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":0");
-                                target.sendMessage(
-                                        Component.text("You have been unmuted.").color(NamedTextColor.GREEN));
+                                plugin.getServer().getPlayer(targetUuid).ifPresent(p -> p.sendMessage(
+                                        Component.text("You have been unmuted.").color(NamedTextColor.GREEN)));
                                 source.sendMessage(
                                         Component.text("Unmuted " + identifier + ".").color(NamedTextColor.GREEN));
                             } else {
@@ -311,17 +322,16 @@ public class CommandSystem {
                                         Component.text(identifier + " is not muted.").color(NamedTextColor.RED));
                             }
                         });
-                    }, () -> {
-                        source.sendMessage(Component.text(
-                                "Player not found online. (Offline lookup not implemented for unmute command via Cloud yet)")
-                                .color(NamedTextColor.RED));
-                    });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
 
         Command.Builder<CommandSource> tempmuteBuilder = commandManager.commandBuilder("tempmute",
                 "velpunish.command.tempmute");
         commandManager.command(tempmuteBuilder
-                .required("player", stringParser())
+                .required(CommandComponent.<CommandSource, String>builder().name("player").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
                 .required("duration", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Muted."))
                 .handler(context -> {
@@ -337,34 +347,32 @@ public class CommandSystem {
                         return;
                     }
 
-                    Optional<Player> targetOpt = plugin.getServer().getPlayer(targetName);
-                    if (targetOpt.isEmpty()) {
-                        source.sendMessage(Component.text("Player not found online.").color(NamedTextColor.RED));
-                        return;
-                    }
+                    resolveTarget(targetName, profile -> {
+                        UUID targetUuid = profile.getUuid();
+                        String targetIp = profile.getLatestIp();
+                        String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
 
-                    Player target = targetOpt.get();
-                    UUID targetUuid = target.getUniqueId();
-                    String targetIp = target.getRemoteAddress().getAddress().getHostAddress();
-                    String operator = source instanceof Player ? ((Player) source).getUsername() : "CONSOLE";
+                        Punishment punishment = new Punishment(
+                                0, targetUuid, targetIp, PunishmentType.MUTE, reason, operator,
+                                System.currentTimeMillis(), expiry, true, "network");
 
-                    Punishment punishment = new Punishment(
-                            0, targetUuid, targetIp, PunishmentType.MUTE, reason, operator,
-                            System.currentTimeMillis(), expiry, true, "network");
+                        plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
+                            plugin.getPunishmentCache().addPunishment(targetUuid, saved);
+                            plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
 
-                    plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
-                        plugin.getPunishmentCache().addPunishment(targetUuid, saved);
-                        plugin.getRedisManager().publishMessage("PUNISHMENT:" + targetUuid + ":" + saved.getId());
+                            plugin.getServer().getPlayer(targetUuid).ifPresent(p -> p.sendMessage(
+                                    Component.text("You have been temporarily muted!\n").color(NamedTextColor.RED)
+                                            .append(Component.text("Reason: " + reason + "\n")
+                                                    .color(NamedTextColor.GRAY))
+                                            .append(Component.text("Duration: " + durationStr)
+                                                    .color(NamedTextColor.GRAY))));
 
-                        target.sendMessage(
-                                Component.text("You have been temporarily muted!\n").color(NamedTextColor.RED)
-                                        .append(Component.text("Reason: " + reason + "\n").color(NamedTextColor.GRAY))
-                                        .append(Component.text("Duration: " + durationStr).color(NamedTextColor.GRAY)));
-
-                        source.sendMessage(
-                                Component.text("Temporarily Muted " + targetName + " for " + durationStr + ".")
-                                        .color(NamedTextColor.GREEN));
-                    });
+                            source.sendMessage(
+                                    Component.text("Temporarily Muted " + targetName + " for " + durationStr + ".")
+                                            .color(NamedTextColor.GREEN));
+                        });
+                    }, () -> source
+                            .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
     }
 
