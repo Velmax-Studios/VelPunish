@@ -47,6 +47,7 @@ public class VelPunishServer extends JavaPlugin {
         redisManager.connect();
 
         getServer().getPluginManager().registerEvents(new com.velpunish.server.listeners.ChatListener(this), this);
+        new com.velpunish.server.commands.CommandSystem(this);
 
         getLogger().info("VelPunish server plugin initialized successfully.");
     }
