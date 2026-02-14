@@ -39,6 +39,39 @@ public class VelPunishServer extends JavaPlugin {
                 try {
                     java.util.UUID targetUuid = java.util.UUID.fromString(parts[1]);
                     punishmentCache.invalidate(targetUuid);
+
+                    org.bukkit.entity.Player player = getServer().getPlayer(targetUuid);
+                    if (player != null) {
+                        punishmentRepository
+                                .getHistory(targetUuid,
+                                        player.getAddress() != null ? player.getAddress().getAddress().getHostAddress()
+                                                : "")
+                                .thenAccept(history -> {
+                                    punishmentCache.cacheHistory(history);
+                                    history.getPunishments().stream()
+                                            .filter(com.velpunish.common.models.Punishment::isActive)
+                                            .filter(p -> p.getType().name().equals("BAN")
+                                                    || p.getType().name().equals("KICK"))
+                                            .findFirst()
+                                            .ifPresent(p -> {
+                                                Runnable disconnectTask = () -> {
+                                                    player.kick(net.kyori.adventure.text.Component
+                                                            .text("You have been punished!\n")
+                                                            .color(net.kyori.adventure.text.format.NamedTextColor.RED)
+                                                            .append(net.kyori.adventure.text.Component
+                                                                    .text("Reason: " + p.getReason())
+                                                                    .color(net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+                                                };
+
+                                                if (isFolia) {
+                                                    getServer().getRegionScheduler().execute(this, player.getLocation(),
+                                                            disconnectTask);
+                                                } else {
+                                                    getServer().getScheduler().runTask(this, disconnectTask);
+                                                }
+                                            });
+                                });
+                    }
                 } catch (IllegalArgumentException ignored) {
                 }
             }
