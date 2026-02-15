@@ -22,10 +22,13 @@ import org.incendo.cloud.component.CommandComponent;
 import com.velpunish.common.commands.OfflinePlayerSuggestionProvider;
 import com.velpunish.common.models.PlayerProfile;
 
+import com.velpunish.common.utils.CooldownManager;
+
 public class CommandSystem {
 
     private final VelPunishServer plugin;
     private final PaperCommandManager<CommandSender> commandManager;
+    private final CooldownManager cooldownManager;
 
     public CommandSystem(VelPunishServer plugin) {
         this.plugin = plugin;
@@ -33,6 +36,8 @@ public class CommandSystem {
                 plugin,
                 ExecutionCoordinator.asyncCoordinator(),
                 org.incendo.cloud.SenderMapper.identity());
+
+        this.cooldownManager = new CooldownManager();
 
         if (this.commandManager.hasCapability(CloudBukkitCapabilities.NATIVE_BRIGADIER)) {
             this.commandManager.registerBrigadier();
@@ -61,9 +66,28 @@ public class CommandSystem {
                         .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Muted by an operator."))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "mute")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "mute") / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+
+                        if (!com.velpunish.common.utils.PermissionUtils.hasLimitBypass(source, "mute")) {
+                            player.sendMessage(Component.text(
+                                    "You do not have permission to permanently mute players! Please use /tempmute.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetName = context.get("player");
                     String reason = context.getOrDefault("reason", "Muted by an operator.");
-                    CommandSender source = context.sender();
 
                     resolveTarget(targetName, profile -> {
                         UUID targetUuid = profile.getUuid();
@@ -86,6 +110,11 @@ public class CommandSystem {
                                         .append(Component.text("Duration: Permanent").color(NamedTextColor.GRAY)));
                             }
 
+                            if (source instanceof Player) {
+                                Player player = (Player) source;
+                                cooldownManager.setCooldown(player.getUniqueId(), "mute",
+                                        com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player, "mute"));
+                            }
                             source.sendMessage(
                                     Component.text("Muted " + targetName + " permanently.")
                                             .color(NamedTextColor.GREEN));
@@ -133,9 +162,27 @@ public class CommandSystem {
                         .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("The Ban Hammer has spoken!"))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "ban")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "ban") / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+
+                        if (!com.velpunish.common.utils.PermissionUtils.hasLimitBypass(source, "ban")) {
+                            player.sendMessage(Component
+                                    .text("You do not have permission to permanently ban players! Please use /tempban.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetName = context.get("player");
                     String reason = context.getOrDefault("reason", "The Ban Hammer has spoken!");
-                    CommandSender source = context.sender();
 
                     resolveTarget(targetName, profile -> {
                         UUID targetUuid = profile.getUuid();
@@ -161,6 +208,11 @@ public class CommandSystem {
                                 }
                             });
 
+                            if (source instanceof Player) {
+                                Player player = (Player) source;
+                                cooldownManager.setCooldown(player.getUniqueId(), "ban",
+                                        com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player, "ban"));
+                            }
                             source.sendMessage(
                                     Component.text("Banned " + targetName + " permanently.")
                                             .color(NamedTextColor.GREEN));
@@ -178,10 +230,21 @@ public class CommandSystem {
                 .required("duration", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Banned."))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "tempban")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "tempban") / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetName = context.get("player");
                     String durationStr = context.get("duration");
                     String reason = context.getOrDefault("reason", "Temporarily Banned.");
-                    CommandSender source = context.sender();
 
                     long expiry = parseDuration(durationStr);
                     if (expiry == -1L) {
@@ -190,6 +253,21 @@ public class CommandSystem {
                         return;
                     }
 
+                    long durationMillis = expiry - System.currentTimeMillis();
+                    long maxAllowedDuration = com.velpunish.common.utils.PermissionUtils.getMaxDurationMillis(source,
+                            "tempban");
+
+                    if (maxAllowedDuration != -1L && durationMillis > maxAllowedDuration) {
+                        long maxSeconds = maxAllowedDuration / 1000;
+                        source.sendMessage(Component
+                                .text("Your maximum allowed duration for tempbans is " + maxSeconds
+                                        + " seconds. Duration has been clamped to your maximum allowed limit.")
+                                .color(NamedTextColor.YELLOW));
+                        expiry = System.currentTimeMillis() + maxAllowedDuration;
+                    }
+
+                    final long finalExpiry = expiry;
+
                     resolveTarget(targetName, profile -> {
                         UUID targetUuid = profile.getUuid();
                         String targetIp = profile.getLatestIp();
@@ -197,7 +275,7 @@ public class CommandSystem {
 
                         Punishment punishment = new Punishment(
                                 0, targetUuid, targetIp, PunishmentType.BAN, reason, operator,
-                                System.currentTimeMillis(), expiry, true, "server");
+                                System.currentTimeMillis(), finalExpiry, true, "server");
 
                         plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
                             plugin.getPunishmentCache().addPunishment(targetUuid, saved);
@@ -215,6 +293,12 @@ public class CommandSystem {
                                 }
                             });
 
+                            if (source instanceof Player) {
+                                Player player = (Player) source;
+                                cooldownManager.setCooldown(player.getUniqueId(), "tempban",
+                                        com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player,
+                                                "tempban"));
+                            }
                             source.sendMessage(
                                     Component.text("Temporarily banned " + targetName + " for " + durationStr + ".")
                                             .color(NamedTextColor.GREEN));
@@ -230,9 +314,20 @@ public class CommandSystem {
                         .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Kicked by an operator."))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "kick")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "kick") / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetName = context.get("player");
                     String reason = context.getOrDefault("reason", "Kicked by an operator.");
-                    CommandSender source = context.sender();
 
                     Player target = plugin.getServer().getPlayerExact(targetName);
                     if (target == null) {
@@ -257,6 +352,11 @@ public class CommandSystem {
                                     .append(Component.text("Reason: " + reason).color(NamedTextColor.GRAY)));
                         });
 
+                        if (source instanceof Player) {
+                            Player player = (Player) source;
+                            cooldownManager.setCooldown(player.getUniqueId(), "kick",
+                                    com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player, "kick"));
+                        }
                         source.sendMessage(Component.text("Kicked " + targetName + ".").color(NamedTextColor.GREEN));
                     });
                 }));
@@ -392,10 +492,22 @@ public class CommandSystem {
                 .required("duration", stringParser())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Temporarily Muted."))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "tempmute")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "tempmute")
+                                            / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetName = context.get("player");
                     String durationStr = context.get("duration");
                     String reason = context.getOrDefault("reason", "Temporarily Muted.");
-                    CommandSender source = context.sender();
 
                     long expiry = parseDuration(durationStr);
                     if (expiry == -1L) {
@@ -404,6 +516,21 @@ public class CommandSystem {
                         return;
                     }
 
+                    long durationMillis = expiry - System.currentTimeMillis();
+                    long maxAllowedDuration = com.velpunish.common.utils.PermissionUtils.getMaxDurationMillis(source,
+                            "tempmute");
+
+                    if (maxAllowedDuration != -1L && durationMillis > maxAllowedDuration) {
+                        long maxSeconds = maxAllowedDuration / 1000;
+                        source.sendMessage(Component
+                                .text("Your maximum allowed duration for tempmutes is " + maxSeconds
+                                        + " seconds. Duration has been clamped to your maximum allowed limit.")
+                                .color(NamedTextColor.YELLOW));
+                        expiry = System.currentTimeMillis() + maxAllowedDuration;
+                    }
+
+                    final long finalExpiry = expiry;
+
                     resolveTarget(targetName, profile -> {
                         UUID targetUuid = profile.getUuid();
                         String targetIp = profile.getLatestIp();
@@ -411,7 +538,7 @@ public class CommandSystem {
 
                         Punishment punishment = new Punishment(
                                 0, targetUuid, targetIp, PunishmentType.MUTE, reason, operator,
-                                System.currentTimeMillis(), expiry, true, "server");
+                                System.currentTimeMillis(), finalExpiry, true, "server");
 
                         plugin.getPunishmentRepository().savePunishment(punishment).thenAccept(saved -> {
                             plugin.getPunishmentCache().addPunishment(targetUuid, saved);
@@ -427,6 +554,12 @@ public class CommandSystem {
                                                         .color(NamedTextColor.GRAY)));
                             }
 
+                            if (source instanceof Player) {
+                                Player player = (Player) source;
+                                cooldownManager.setCooldown(player.getUniqueId(), "tempmute",
+                                        com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player,
+                                                "tempmute"));
+                            }
                             source.sendMessage(
                                     Component.text("Temporarily Muted " + targetName + " for " + durationStr + ".")
                                             .color(NamedTextColor.GREEN));
@@ -573,9 +706,20 @@ public class CommandSystem {
                         .build())
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Your IP has been banned!"))
                 .handler(context -> {
+                    CommandSender source = context.sender();
+                    if (source instanceof Player) {
+                        Player player = (Player) source;
+                        if (cooldownManager.isOnCooldown(player.getUniqueId(), "ipban")) {
+                            player.sendMessage(Component.text("You are on cooldown for this command for " +
+                                    (cooldownManager.getCooldownRemainingMillis(player.getUniqueId(), "ipban") / 1000)
+                                    + "s.")
+                                    .color(NamedTextColor.RED));
+                            return;
+                        }
+                    }
+
                     String targetStr = context.get("target");
                     String reason = context.getOrDefault("reason", "Your IP has been banned!");
-                    CommandSender source = context.sender();
                     String operator = source instanceof Player ? ((Player) source).getName() : "CONSOLE";
 
                     java.util.function.Consumer<String> executeBan = (String ipToBan) -> {
@@ -586,6 +730,11 @@ public class CommandSystem {
                         plugin.getPunishmentRepository().saveIPPunishment(punishment).thenAccept(saved -> {
                             plugin.getPunishmentCache().addIpPunishment(ipToBan, saved);
                             plugin.getRedisManager().publishMessage("PUNISHMENT_IP:" + ipToBan + ":" + saved.getId());
+                            if (source instanceof Player) {
+                                Player player = (Player) source;
+                                cooldownManager.setCooldown(player.getUniqueId(), "ipban",
+                                        com.velpunish.common.utils.PermissionUtils.getCooldownSeconds(player, "ipban"));
+                            }
                             source.sendMessage(
                                     Component.text("IP Banned " + targetStr + " (" + ipToBan + ") permanently.")
                                             .color(NamedTextColor.GREEN));
