@@ -227,9 +227,23 @@ public class PunishmentRepository {
                 }
 
                 if (ip != null) {
+                    List<String> ipsToCheck = com.velpunish.common.utils.IPUtils.generateIpWildcards(ip);
+                    StringBuilder placeholders = new StringBuilder();
+                    for (int i = 0; i < ipsToCheck.size(); i++) {
+                        placeholders.append("?");
+                        if (i < ipsToCheck.size() - 1) {
+                            placeholders.append(",");
+                        }
+                    }
+
                     try (PreparedStatement stmt = conn
-                            .prepareStatement("SELECT * FROM ip_punishments WHERE ip = ? ORDER BY start_time DESC")) {
-                        stmt.setString(1, ip);
+                            .prepareStatement("SELECT * FROM ip_punishments WHERE ip IN (" + placeholders
+                                    + ") ORDER BY start_time DESC")) {
+
+                        for (int i = 0; i < ipsToCheck.size(); i++) {
+                            stmt.setString(i + 1, ipsToCheck.get(i));
+                        }
+
                         try (ResultSet rs = stmt.executeQuery()) {
                             while (rs.next()) {
                                 ipPunishments.add(new IPPunishment(

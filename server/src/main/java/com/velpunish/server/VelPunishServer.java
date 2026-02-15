@@ -51,12 +51,13 @@ public class VelPunishServer extends JavaPlugin {
 
                     org.bukkit.entity.Player player = getServer().getPlayer(targetUuid);
                     if (player != null) {
+                        String currentIp = player.getAddress() != null
+                                ? player.getAddress().getAddress().getHostAddress()
+                                : "";
                         punishmentRepository
-                                .getHistory(targetUuid,
-                                        player.getAddress() != null ? player.getAddress().getAddress().getHostAddress()
-                                                : "")
+                                .getHistory(targetUuid, currentIp)
                                 .thenAccept(history -> {
-                                    punishmentCache.cacheHistory(history);
+                                    punishmentCache.cacheHistory(history, currentIp);
                                     history.getPunishments().stream()
                                             .filter(com.velpunish.common.models.Punishment::isActive)
                                             .filter(p -> p.getType().name().equals("BAN")
@@ -83,6 +84,40 @@ public class VelPunishServer extends JavaPlugin {
                     }
                 } catch (IllegalArgumentException ignored) {
                 }
+            } else if (parts.length >= 3 && "PUNISHMENT_IP".equals(parts[0])) {
+                String targetIp = parts[1];
+                punishmentCache.invalidateIp(targetIp);
+
+                for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
+                    String currentIp = player.getAddress() != null ? player.getAddress().getAddress().getHostAddress()
+                            : "";
+                    if (com.velpunish.common.utils.IPUtils.matchesWildcard(currentIp, targetIp)) {
+                        punishmentRepository.getHistory(player.getUniqueId(), currentIp).thenAccept(history -> {
+                            punishmentCache.cacheHistory(history, currentIp);
+                            history.getIpPunishments().stream()
+                                    .filter(com.velpunish.common.models.IPPunishment::isActive)
+                                    .filter(p -> p.getType().name().equals("BAN") || p.getType().name().equals("KICK"))
+                                    .findFirst()
+                                    .ifPresent(p -> {
+                                        Runnable disconnectTask = () -> {
+                                            player.kick(net.kyori.adventure.text.Component
+                                                    .text("Your IP has been punished!\n")
+                                                    .color(net.kyori.adventure.text.format.NamedTextColor.RED)
+                                                    .append(net.kyori.adventure.text.Component
+                                                            .text("Reason: " + p.getReason())
+                                                            .color(net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+                                        };
+
+                                        if (isFolia) {
+                                            getServer().getRegionScheduler().execute(this, player.getLocation(),
+                                                    disconnectTask);
+                                        } else {
+                                            getServer().getScheduler().runTask(this, disconnectTask);
+                                        }
+                                    });
+                        });
+                    }
+                }
             }
         });
 
@@ -93,10 +128,14 @@ public class VelPunishServer extends JavaPlugin {
         new com.velpunish.server.commands.CommandSystem(this);
 
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new com.velpunish.server.hooks.VelPunishExpansion(this).register();
+            registerPlaceholderAPI();
         }
 
         getLogger().info("VelPunish server plugin initialized successfully.");
+    }
+
+    private void registerPlaceholderAPI() {
+        new com.velpunish.server.hooks.VelPunishExpansion(this).register();
     }
 
     @Override

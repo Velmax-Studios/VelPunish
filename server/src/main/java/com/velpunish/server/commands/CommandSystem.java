@@ -269,7 +269,6 @@ public class CommandSystem {
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unbanned."))
                 .handler(context -> {
                     String identifier = context.get("player_or_id");
-                    String reason = context.getOrDefault("reason", "Unbanned.");
                     CommandSender source = context.sender();
 
                     try {
@@ -329,7 +328,6 @@ public class CommandSystem {
                 .optional("reason", greedyStringParser(), DefaultValue.constant("Unmuted."))
                 .handler(context -> {
                     String identifier = context.get("player_or_id");
-                    String reason = context.getOrDefault("reason", "Unmuted.");
                     CommandSender source = context.sender();
 
                     try {
@@ -436,6 +434,267 @@ public class CommandSystem {
                     }, () -> source
                             .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
+
+        Command.Builder<CommandSender> staffHistoryBuilder = commandManager.commandBuilder("staffhistory",
+                "velpunish.command.staffhistory");
+        commandManager.command(staffHistoryBuilder
+                .required("operator", stringParser())
+                .handler(context -> {
+                    String operator = context.get("operator");
+                    CommandSender source = context.sender();
+
+                    plugin.getPunishmentRepository().getStaffHistory(operator).thenAccept(punishments -> {
+                        source.sendMessage(
+                                Component.text("History of punishments by " + operator + ":")
+                                        .color(NamedTextColor.GOLD));
+                        if (punishments.isEmpty()) {
+                            source.sendMessage(Component.text("No history found.").color(NamedTextColor.GRAY));
+                        } else {
+                            punishments.forEach(p -> {
+                                source.sendMessage(Component.text(
+                                        "- [" + p.getType() + "] " + p.getReason() + " (Active: " + p.isActive()
+                                                + ") on "
+                                                + plugin.getProfileCache().getProfile(p.getUuid()).join()
+                                                        .map(PlayerProfile::getUsername).orElse(p.getUuid().toString()))
+                                        .color(NamedTextColor.YELLOW));
+                            });
+                        }
+                    });
+                }));
+
+        Command.Builder<CommandSender> staffRollbackBuilder = commandManager.commandBuilder("staffrollback",
+                "velpunish.command.staffrollback");
+        commandManager.command(staffRollbackBuilder
+                .required("operator", stringParser())
+                .required("duration", stringParser())
+                .handler(context -> {
+                    String operator = context.get("operator");
+                    String durationStr = context.get("duration");
+                    CommandSender source = context.sender();
+
+                    long millis = parseDurationMillis(durationStr);
+                    if (millis == -1L) {
+                        source.sendMessage(Component.text("Invalid duration format. Use 1d, 1h, 30m, etc.")
+                                .color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    long sinceTime = System.currentTimeMillis() - millis;
+
+                    plugin.getPunishmentRepository().rollbackStaffPunishments(operator, sinceTime)
+                            .thenAccept(updated -> {
+                                source.sendMessage(
+                                        Component
+                                                .text("Rolled back " + updated + " active punishments issued by "
+                                                        + operator + " within the last " + durationStr + ".")
+                                                .color(NamedTextColor.GREEN));
+                            });
+                }));
+
+        Command.Builder<CommandSender> editBuilder = commandManager.commandBuilder("editpunishment",
+                "velpunish.command.editpunishment");
+
+        commandManager.command(editBuilder
+                .literal("reason")
+                .required("id", stringParser())
+                .required("new_reason", greedyStringParser())
+                .handler(context -> {
+                    String idStr = context.get("id");
+                    String newReason = context.get("new_reason");
+                    CommandSender source = context.sender();
+
+                    try {
+                        int id = Integer.parseInt(idStr);
+                        plugin.getPunishmentRepository().getPunishmentById(id).thenAccept(punishment -> {
+                            if (punishment != null) {
+                                punishment.setReason(newReason);
+                                plugin.getPunishmentRepository().updatePunishment(punishment);
+                                plugin.getPunishmentCache().invalidate(punishment.getUuid());
+                                plugin.getRedisManager().publishMessage(
+                                        "PUNISHMENT:" + punishment.getUuid() + ":" + punishment.getId());
+                                source.sendMessage(
+                                        Component.text("Updated reason for punishment #" + id + " to: " + newReason)
+                                                .color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(Component.text("Punishment ID #" + id + " not found.")
+                                        .color(NamedTextColor.RED));
+                            }
+                        });
+                    } catch (NumberFormatException e) {
+                        source.sendMessage(Component.text("Invalid Punishment ID.").color(NamedTextColor.RED));
+                    }
+                }));
+
+        commandManager.command(editBuilder
+                .literal("duration")
+                .required("id", stringParser())
+                .required("new_duration", stringParser())
+                .handler(context -> {
+                    String idStr = context.get("id");
+                    String newDuration = context.get("new_duration");
+                    CommandSender source = context.sender();
+
+                    long expiry = parseDuration(newDuration);
+                    if (expiry == -1L && !newDuration.equalsIgnoreCase("permanent")
+                            && !newDuration.equalsIgnoreCase("perm")) {
+                        source.sendMessage(
+                                Component.text("Invalid duration format. Use 1d, 1h, 30m, etc. or 'permanent'")
+                                        .color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    long finalExpiry = (newDuration.equalsIgnoreCase("permanent")
+                            || newDuration.equalsIgnoreCase("perm")) ? -1L : expiry;
+
+                    try {
+                        int id = Integer.parseInt(idStr);
+                        plugin.getPunishmentRepository().getPunishmentById(id).thenAccept(punishment -> {
+                            if (punishment != null) {
+                                punishment.setEndTime(finalExpiry);
+                                plugin.getPunishmentRepository().updatePunishment(punishment);
+                                plugin.getPunishmentCache().invalidate(punishment.getUuid());
+                                plugin.getRedisManager().publishMessage(
+                                        "PUNISHMENT:" + punishment.getUuid() + ":" + punishment.getId());
+                                source.sendMessage(Component.text("Updated duration for punishment #" + id + ".")
+                                        .color(NamedTextColor.GREEN));
+                            } else {
+                                source.sendMessage(Component.text("Punishment ID #" + id + " not found.")
+                                        .color(NamedTextColor.RED));
+                            }
+                        });
+                    } catch (NumberFormatException e) {
+                        source.sendMessage(Component.text("Invalid Punishment ID.").color(NamedTextColor.RED));
+                    }
+                }));
+        Command.Builder<CommandSender> ipbanBuilder = commandManager.commandBuilder("ipban", "velpunish.command.ipban");
+        commandManager.command(ipbanBuilder
+                .required(CommandComponent.<CommandSender, String>builder().name("target").parser(stringParser())
+                        .suggestionProvider(new OfflinePlayerSuggestionProvider<>(plugin.getProfileRepository()))
+                        .build())
+                .optional("reason", greedyStringParser(), DefaultValue.constant("Your IP has been banned!"))
+                .handler(context -> {
+                    String targetStr = context.get("target");
+                    String reason = context.getOrDefault("reason", "Your IP has been banned!");
+                    CommandSender source = context.sender();
+                    String operator = source instanceof Player ? ((Player) source).getName() : "CONSOLE";
+
+                    java.util.function.Consumer<String> executeBan = (String ipToBan) -> {
+                        com.velpunish.common.models.IPPunishment punishment = new com.velpunish.common.models.IPPunishment(
+                                0, ipToBan, com.velpunish.common.models.PunishmentType.BAN, reason, operator,
+                                System.currentTimeMillis(), -1, true, "server");
+
+                        plugin.getPunishmentRepository().saveIPPunishment(punishment).thenAccept(saved -> {
+                            plugin.getPunishmentCache().addIpPunishment(ipToBan, saved);
+                            plugin.getRedisManager().publishMessage("PUNISHMENT_IP:" + ipToBan + ":" + saved.getId());
+                            source.sendMessage(
+                                    Component.text("IP Banned " + targetStr + " (" + ipToBan + ") permanently.")
+                                            .color(NamedTextColor.GREEN));
+                        });
+                    };
+
+                    if (targetStr.matches("^([0-9]{1,3}\\.|\\*\\.){3}([0-9]{1,3}|\\*)$") || targetStr.contains(":")) {
+                        executeBan.accept(targetStr);
+                    } else {
+                        resolveTarget(targetStr, profile -> {
+                            if (profile.getLatestIp() == null || profile.getLatestIp().isEmpty()) {
+                                source.sendMessage(Component.text("No IP address found for player " + targetStr)
+                                        .color(NamedTextColor.RED));
+                                return;
+                            }
+                            executeBan.accept(profile.getLatestIp());
+                        }, () -> source.sendMessage(Component.text("Player/IP not found.").color(NamedTextColor.RED)));
+                    }
+                }));
+
+        Command.Builder<CommandSender> unipbanBuilder = commandManager.commandBuilder("unipban",
+                "velpunish.command.unipban");
+        commandManager.command(unipbanBuilder
+                .required("target", stringParser())
+                .handler(context -> {
+                    String targetStr = context.get("target");
+                    CommandSender source = context.sender();
+
+                    java.util.function.Consumer<String> executeUnban = (String ipToUnban) -> {
+                        plugin.getPunishmentRepository().getHistory(UUID.randomUUID(), ipToUnban)
+                                .thenAccept(history -> {
+                                    boolean unbanned = false;
+                                    for (com.velpunish.common.models.IPPunishment p : history.getIpPunishments()) {
+                                        if (p.isActive()
+                                                && p.getType() == com.velpunish.common.models.PunishmentType.BAN) {
+                                            plugin.getPunishmentRepository().revokeIPPunishment(p.getId());
+                                            unbanned = true;
+                                        }
+                                    }
+                                    if (unbanned) {
+                                        plugin.getPunishmentCache().invalidateIp(ipToUnban);
+                                        plugin.getRedisManager().publishMessage("PUNISHMENT_IP:" + ipToUnban + ":0");
+                                        source.sendMessage(
+                                                Component.text("Unbanned IP " + targetStr + " (" + ipToUnban + ")")
+                                                        .color(NamedTextColor.GREEN));
+                                    } else {
+                                        source.sendMessage(Component.text("No active IP ban found for " + targetStr)
+                                                .color(NamedTextColor.RED));
+                                    }
+                                });
+                    };
+
+                    if (targetStr.matches("^([0-9]{1,3}\\.|\\*\\.){3}([0-9]{1,3}|\\*)$") || targetStr.contains(":")) {
+                        executeUnban.accept(targetStr);
+                    } else {
+                        resolveTarget(targetStr, profile -> {
+                            if (profile.getLatestIp() == null || profile.getLatestIp().isEmpty()) {
+                                source.sendMessage(Component.text("No IP address found for player " + targetStr)
+                                        .color(NamedTextColor.RED));
+                                return;
+                            }
+                            executeUnban.accept(profile.getLatestIp());
+                        }, () -> source.sendMessage(Component.text("Player/IP not found.").color(NamedTextColor.RED)));
+                    }
+                }));
+    }
+
+    private long parseDurationMillis(String input) {
+        if (input == null || input.isEmpty())
+            return -1L;
+        long multiplier = 1000L;
+        char lastChar = Character.toLowerCase(input.charAt(input.length() - 1));
+        String numberPart = input;
+
+        if (Character.isLetter(lastChar)) {
+            numberPart = input.substring(0, input.length() - 1);
+            switch (lastChar) {
+                case 's':
+                    multiplier = 1000L;
+                    break;
+                case 'm':
+                    multiplier = 60000L;
+                    break;
+                case 'h':
+                    multiplier = 3600000L;
+                    break;
+                case 'd':
+                    multiplier = 86400000L;
+                    break;
+                case 'w':
+                    multiplier = 604800000L;
+                    break;
+                case 'M':
+                    multiplier = 2592000000L;
+                    break;
+                case 'y':
+                    multiplier = 31536000000L;
+                    break;
+                default:
+                    return -1L;
+            }
+        }
+
+        try {
+            long value = Long.parseLong(numberPart);
+            return value * multiplier;
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     private long parseDuration(String input) {

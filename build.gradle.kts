@@ -9,8 +9,8 @@ allprojects {
     repositories {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
-        maven("https://repo.incendo.org/content/repositories/snapshots/")
         maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
+        maven("https://repo.incendo.org/content/repositories/snapshots/")
     }
 }
 

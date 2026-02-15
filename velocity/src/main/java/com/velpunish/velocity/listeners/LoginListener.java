@@ -30,7 +30,7 @@ public class LoginListener {
 
         try {
             History history = plugin.getPunishmentRepository().getHistory(uuid, ip).get();
-            plugin.getPunishmentCache().cacheHistory(history);
+            plugin.getPunishmentCache().cacheHistory(history, ip);
 
             List<Punishment> activePunishments = plugin.getPunishmentCache().getActivePunishments(uuid);
             for (Punishment punishment : activePunishments) {

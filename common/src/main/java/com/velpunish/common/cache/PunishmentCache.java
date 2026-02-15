@@ -29,11 +29,10 @@ public class PunishmentCache {
                 .build();
     }
 
-    public void cacheHistory(History history) {
+    public void cacheHistory(History history, String searchIp) {
         historyCache.put(history.getUuid(), history);
-        if (history.getIpPunishments() != null && !history.getIpPunishments().isEmpty()) {
-            String ip = history.getIpPunishments().get(0).getIp();
-            cacheIpPunishments(ip, history.getIpPunishments());
+        if (searchIp != null && history.getIpPunishments() != null) {
+            cacheIpPunishments(searchIp, history.getIpPunishments());
         }
     }
 
@@ -94,7 +93,13 @@ public class PunishmentCache {
     }
 
     public void invalidateIp(String ip) {
-        ipPunishmentCache.invalidate(ip);
+        if (ip != null && ip.contains("*")) {
+            ipPunishmentCache.asMap().keySet().stream()
+                    .filter(key -> com.velpunish.common.utils.IPUtils.matchesWildcard(key, ip))
+                    .forEach(ipPunishmentCache::invalidate);
+        } else {
+            ipPunishmentCache.invalidate(ip);
+        }
     }
 
     public List<Punishment> getActivePunishments(UUID uuid) {

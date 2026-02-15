@@ -68,7 +68,8 @@ public class VelPunishVelocity {
                         punishmentRepository
                                 .getHistory(targetUuid, player.getRemoteAddress().getAddress().getHostAddress())
                                 .thenAccept(history -> {
-                                    punishmentCache.cacheHistory(history);
+                                    punishmentCache.cacheHistory(history,
+                                            player.getRemoteAddress().getAddress().getHostAddress());
                                     history.getPunishments().stream()
                                             .filter(com.velpunish.common.models.Punishment::isActive)
                                             .filter(p -> p.getType().name().equals("BAN")
@@ -85,6 +86,30 @@ public class VelPunishVelocity {
                                 });
                     });
                 } catch (IllegalArgumentException ignored) {
+                }
+            } else if (parts.length >= 3 && "PUNISHMENT_IP".equals(parts[0])) {
+                String targetIp = parts[1];
+                punishmentCache.invalidateIp(targetIp);
+
+                for (com.velocitypowered.api.proxy.Player player : server.getAllPlayers()) {
+                    String currentIp = player.getRemoteAddress().getAddress().getHostAddress();
+                    if (com.velpunish.common.utils.IPUtils.matchesWildcard(currentIp, targetIp)) {
+                        punishmentRepository.getHistory(player.getUniqueId(), currentIp).thenAccept(history -> {
+                            punishmentCache.cacheHistory(history, currentIp);
+                            history.getIpPunishments().stream()
+                                    .filter(com.velpunish.common.models.IPPunishment::isActive)
+                                    .filter(p -> p.getType().name().equals("BAN") || p.getType().name().equals("KICK"))
+                                    .findFirst()
+                                    .ifPresent(p -> {
+                                        player.disconnect(net.kyori.adventure.text.Component
+                                                .text("Your IP has been punished!\n")
+                                                .color(net.kyori.adventure.text.format.NamedTextColor.RED)
+                                                .append(net.kyori.adventure.text.Component
+                                                        .text("Reason: " + p.getReason())
+                                                        .color(net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+                                    });
+                        });
+                    }
                 }
             }
         });

@@ -32,7 +32,7 @@ public class ChatListener implements Listener {
         String ip = address != null ? address.getAddress().getHostAddress() : "";
 
         plugin.getPunishmentRepository().getHistory(uuid, ip).thenAccept(history -> {
-            plugin.getPunishmentCache().cacheHistory(history);
+            plugin.getPunishmentCache().cacheHistory(history, ip);
         });
     }
 
