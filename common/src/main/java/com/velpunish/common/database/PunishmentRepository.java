@@ -253,4 +253,65 @@ public class PunishmentRepository {
             return new History(uuid, punishments, ipPunishments);
         }, executor);
     }
+
+    public CompletableFuture<List<Punishment>> getStaffHistory(String operator) {
+        return CompletableFuture.supplyAsync(() -> {
+            List<Punishment> punishments = new ArrayList<>();
+            try (Connection conn = databaseManager.getConnection();
+                    PreparedStatement stmt = conn.prepareStatement(
+                            "SELECT * FROM punishments WHERE operator = ? ORDER BY start_time DESC")) {
+                stmt.setString(1, operator);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        punishments.add(new Punishment(
+                                rs.getInt("id"),
+                                UUID.fromString(rs.getString("uuid")),
+                                rs.getString("ip"),
+                                PunishmentType.valueOf(rs.getString("type")),
+                                rs.getString("reason"),
+                                rs.getString("operator"),
+                                rs.getLong("start_time"),
+                                rs.getLong("end_time"),
+                                rs.getBoolean("active"),
+                                rs.getString("server")));
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return punishments;
+        }, executor);
+    }
+
+    public CompletableFuture<Integer> rollbackStaffPunishments(String operator, long sinceTime) {
+        return CompletableFuture.supplyAsync(() -> {
+            int updated = 0;
+            try (Connection conn = databaseManager.getConnection()) {
+                conn.setAutoCommit(false);
+                try (PreparedStatement stmt1 = conn.prepareStatement(
+                        "UPDATE punishments SET active = false WHERE operator = ? AND start_time >= ? AND active = true");
+                        PreparedStatement stmt2 = conn.prepareStatement(
+                                "UPDATE ip_punishments SET active = false WHERE operator = ? AND start_time >= ? AND active = true")) {
+
+                    stmt1.setString(1, operator);
+                    stmt1.setLong(2, sinceTime);
+                    updated += stmt1.executeUpdate();
+
+                    stmt2.setString(1, operator);
+                    stmt2.setLong(2, sinceTime);
+                    updated += stmt2.executeUpdate();
+
+                    conn.commit();
+                } catch (Exception e) {
+                    conn.rollback();
+                    e.printStackTrace();
+                } finally {
+                    conn.setAutoCommit(true);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return updated;
+        }, executor);
+    }
 }

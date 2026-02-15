@@ -374,6 +374,106 @@ public class CommandSystem {
                     }, () -> source
                             .sendMessage(Component.text("Player not found in database.").color(NamedTextColor.RED)));
                 }));
+
+        Command.Builder<CommandSource> staffHistoryBuilder = commandManager.commandBuilder("staffhistory",
+                "velpunish.command.staffhistory");
+        commandManager.command(staffHistoryBuilder
+                .required("operator", stringParser())
+                .handler(context -> {
+                    String operator = context.get("operator");
+                    CommandSource source = context.sender();
+
+                    plugin.getPunishmentRepository().getStaffHistory(operator).thenAccept(punishments -> {
+                        source.sendMessage(
+                                Component.text("History of punishments by " + operator + ":")
+                                        .color(NamedTextColor.GOLD));
+                        if (punishments.isEmpty()) {
+                            source.sendMessage(Component.text("No history found.").color(NamedTextColor.GRAY));
+                        } else {
+                            punishments.forEach(p -> {
+                                source.sendMessage(Component.text(
+                                        "- [" + p.getType() + "] " + p.getReason() + " (Active: " + p.isActive()
+                                                + ") on "
+                                                + plugin.getProfileCache().getProfile(p.getUuid()).join()
+                                                        .map(PlayerProfile::getUsername).orElse(p.getUuid().toString()))
+                                        .color(NamedTextColor.YELLOW));
+                            });
+                        }
+                    });
+                }));
+
+        Command.Builder<CommandSource> staffRollbackBuilder = commandManager.commandBuilder("staffrollback",
+                "velpunish.command.staffrollback");
+        commandManager.command(staffRollbackBuilder
+                .required("operator", stringParser())
+                .required("duration", stringParser())
+                .handler(context -> {
+                    String operator = context.get("operator");
+                    String durationStr = context.get("duration");
+                    CommandSource source = context.sender();
+
+                    long millis = parseDurationMillis(durationStr);
+                    if (millis == -1L) {
+                        source.sendMessage(Component.text("Invalid duration format. Use 1d, 1h, 30m, etc.")
+                                .color(NamedTextColor.RED));
+                        return;
+                    }
+
+                    long sinceTime = System.currentTimeMillis() - millis;
+
+                    plugin.getPunishmentRepository().rollbackStaffPunishments(operator, sinceTime)
+                            .thenAccept(updated -> {
+                                source.sendMessage(
+                                        Component
+                                                .text("Rolled back " + updated + " active punishments issued by "
+                                                        + operator + " within the last " + durationStr + ".")
+                                                .color(NamedTextColor.GREEN));
+                            });
+                }));
+    }
+
+    private long parseDurationMillis(String input) {
+        if (input == null || input.isEmpty())
+            return -1L;
+        long multiplier = 1000L;
+        char lastChar = Character.toLowerCase(input.charAt(input.length() - 1));
+        String numberPart = input;
+
+        if (Character.isLetter(lastChar)) {
+            numberPart = input.substring(0, input.length() - 1);
+            switch (lastChar) {
+                case 's':
+                    multiplier = 1000L;
+                    break;
+                case 'm':
+                    multiplier = 60000L;
+                    break;
+                case 'h':
+                    multiplier = 3600000L;
+                    break;
+                case 'd':
+                    multiplier = 86400000L;
+                    break;
+                case 'w':
+                    multiplier = 604800000L;
+                    break;
+                case 'M':
+                    multiplier = 2592000000L;
+                    break;
+                case 'y':
+                    multiplier = 31536000000L;
+                    break;
+                default:
+                    return -1L;
+            }
+        }
+
+        try {
+            long value = Long.parseLong(numberPart);
+            return value * multiplier;
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     private long parseDuration(String input) {
